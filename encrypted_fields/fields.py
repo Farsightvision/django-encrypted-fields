@@ -2,11 +2,12 @@ from __future__ import annotations
 
 import base64
 import json
+import os
 from typing import Any
 
-from cryptography.fernet import Fernet, InvalidToken, MultiFernet
 from cryptography.hazmat.backends import default_backend
 from cryptography.hazmat.primitives import hashes
+from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
 from django.conf import settings
 from django.core.validators import MaxValueValidator, MinValueValidator
@@ -40,22 +41,40 @@ class EncryptedFieldMixin:
                     backend=default_backend(),
                 )
                 keys.append(
-                    base64.urlsafe_b64encode(
-                        kdf.derive(secret_key.encode("utf-8"))
-                    )
+                    kdf.derive(secret_key.encode("utf-8"))
                 )
         return keys
 
-    @cached_property
-    def f(self) -> Fernet | MultiFernet:
-        if len(self.keys) == 1:
-            return Fernet(self.keys[0])
-        return MultiFernet([Fernet(k) for k in self.keys])
+    def encrypt_value(self, plaintext: str) -> str:
+        # Use the first key for encryption.
+        key = self.keys[0]
+        aesgcm = AESGCM(key)
+        nonce = os.urandom(12)  # Recommended size for GCM nonce is 12 bytes.
+        ciphertext = aesgcm.encrypt(nonce, plaintext.encode("utf-8"), None)
+        encrypted = nonce + ciphertext
+        return base64.urlsafe_b64encode(encrypted).decode("utf-8")
+
+    def decrypt_value(self, encrypted_value: str) -> str:
+        try:
+            encrypted = base64.urlsafe_b64decode(encrypted_value.encode("utf-8"))
+        except Exception:
+            # If it is not properly encoded, assume it is plain text.
+            return encrypted_value
+        # The nonce is the first 12 bytes.
+        nonce, ciphertext = encrypted[:12], encrypted[12:]
+        # Try decryption with each key for key rotation support.
+        for key in self.keys:
+            aesgcm = AESGCM(key)
+            try:
+                plaintext = aesgcm.decrypt(nonce, ciphertext, None)
+                return plaintext.decode("utf-8")
+            except Exception:
+                continue
+        # If none of the keys worked, raise an exception.
+        raise ValueError("Decryption failed with all provided keys.")
 
     def get_internal_type(self) -> str:
-        """
-        To treat everything as text
-        """
+        # Treat everything as text
         return "TextField"
 
     def get_prep_value(self, value: _TypeAny) -> _TypeAny:
@@ -63,7 +82,7 @@ class EncryptedFieldMixin:
         if value:
             if not isinstance(value, str):
                 value = str(value)
-            return self.f.encrypt(bytes(value, "utf-8")).decode("utf-8")
+            return self.encrypt_value(value)
         return None
 
     def get_db_prep_value(
@@ -92,18 +111,13 @@ class EncryptedFieldMixin:
         ):
             return value
         try:
-            value = self.f.decrypt(bytes(value, "utf-8")).decode("utf-8")
-        except InvalidToken:
-            pass
-        except UnicodeEncodeError:
-            pass
-        return super().to_python(value)
+            decrypted_value = self.decrypt_value(value)
+        except Exception:
+            decrypted_value = value
+        return super().to_python(decrypted_value)
 
     def clean(self, value: _TypeAny, model_instance: models.Field) -> _TypeAny:
-        """
-        Create and assign a semaphore so that to_python method will not try
-        to decrypt an already decrypted value during cleaning of a form
-        """
+        # Prevent repeated decryption during form cleaning.
         self._already_decrypted = True
         ret = super().clean(value, model_instance)
         del self._already_decrypted
@@ -125,13 +139,10 @@ class EncryptedDateTimeField(EncryptedFieldMixin, models.DateTimeField):
 class EncryptedIntegerField(EncryptedFieldMixin, models.IntegerField):
     @cached_property
     def validators(self) -> list[MinValueValidator | MaxValueValidator]:
-        # These validators can't be added at field initialization time since
-        # they're based on values retrieved from `connection`.
+        # Validators are added based on connection information at runtime.
         validators_ = [*self.default_validators, *self._validators]
         internal_type = models.IntegerField().get_internal_type()
-        min_value, max_value = BaseDatabaseOperations.integer_field_ranges[
-            internal_type
-        ]
+        min_value, max_value = BaseDatabaseOperations.integer_field_ranges[internal_type]
         if min_value is not None and not any(
             (
                 isinstance(validator, MinValueValidator)
@@ -183,8 +194,9 @@ class EncryptedJSONField(EncryptedFieldMixin, models.JSONField):
             return {key: self._encrypt_values(data) for key, data in value.items()}
         if isinstance(value, list):
             return [self._encrypt_values(data) for data in value]
-        value = str(value)
-        return self.f.encrypt(bytes(value, "utf-8")).decode("utf-8")
+        # Convert the value to a string and encrypt it.
+        plain = str(value)
+        return self.encrypt_value(plain)
 
     def _decrypt_values(self, value: _TypeAny) -> _TypeAny:
         if value is None:
@@ -193,10 +205,14 @@ class EncryptedJSONField(EncryptedFieldMixin, models.JSONField):
             return {key: self._decrypt_values(data) for key, data in value.items()}
         if isinstance(value, list):
             return [self._decrypt_values(data) for data in value]
-        value = str(value)
-        return self.f.decrypt(bytes(value, "utf-8")).decode("utf-8")
+        # Attempt decryption; if it fails, return the value as-is.
+        try:
+            return self.decrypt_value(str(value))
+        except Exception:
+            return value
 
     def get_prep_value(self, value: _TypeAny) -> str:
+        # Encrypt each value within the JSON structure and then dump to JSON.
         return json.dumps(self._encrypt_values(value=value), cls=self.encoder)
 
     def get_internal_type(self) -> str:
@@ -210,9 +226,8 @@ class EncryptedJSONField(EncryptedFieldMixin, models.JSONField):
         ):
             return value
         try:
-            value = self._decrypt_values(value=json.loads(value))
-        except InvalidToken:
-            pass
-        except UnicodeEncodeError:
+            loaded = json.loads(value)
+            value = self._decrypt_values(loaded)
+        except Exception:
             pass
         return super().to_python(value)

@@ -1,6 +1,3 @@
-[![Pypi Package](https://badge.fury.io/py/django-fernet-encrypted-fields.png)](http://badge.fury.io/py/django-fernet-encrypted-fields)
-[![Jazzband](https://jazzband.co/static/img/badge.svg)](https://jazzband.co/)
-
 ### Django Fernet Encrypted Fields
 
 This package was created as a successor to [django-encrypted-fields](https://github.com/defrex/django-encrypted-fields).

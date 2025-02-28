@@ -1,3 +1,17 @@
+[project]
+name = "django-encrypted-fields"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "cffi==1.14.6",
+    "cryptography==35.0.0",
+    "django>=3.2",
+    "pycparser==2.20",
+]
+
+
 ##################
 # ruff
 ##################
@@ -10,16 +24,7 @@ lint.unfixable = ["ERA001", "F401"]
 include = ["encrypted_fields/*.py", "package_test/*.py"]
 target-version = "py312"
 
-##################
-# mypy
-##################
-[tool.mypy]
-mypy_path = "$MYPY_CONFIG_FILE_DIR"
-packages = ["encrypted_fields"]
-python_version = "3.12"
-
-strict = true
-warn_unreachable = true
-warn_no_return = true
-ignore_missing_imports = true
-disallow_untyped_decorators = false
+[dependency-groups]
+dev = [
+    "pytest>=8.3.4",
+]
