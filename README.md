@@ -1,11 +1,9 @@
-### Django Fernet Encrypted Fields
-
-This package was created as a successor to [django-encrypted-fields](https://github.com/defrex/django-encrypted-fields).
+### Django AESGCM Encrypted Fields
 
 #### Getting Started
 
 ```shell
-$ pip install django-fernet-encrypted-fields
+$ pip install django-encrypted-fields
 ```
 
 In your `settings.py`, set random SALT_KEY
