@@ -25,9 +25,7 @@ class EncryptedFieldMixin:
     def keys(self) -> list[bytes]:
         keys = []
         salt_keys = (
-            settings.SALT_KEY
-            if isinstance(settings.SALT_KEY, list)
-            else [settings.SALT_KEY]
+            settings.SALT_KEY if isinstance(settings.SALT_KEY, list) else [settings.SALT_KEY]
         )
         secret_keys = [settings.SECRET_KEY] + getattr(settings, "SECRET_KEY_FALLBACKS", list())
         for secret_key in secret_keys:
@@ -40,9 +38,7 @@ class EncryptedFieldMixin:
                     iterations=100_000,
                     backend=default_backend(),
                 )
-                keys.append(
-                    kdf.derive(secret_key.encode("utf-8"))
-                )
+                keys.append(kdf.derive(secret_key.encode("utf-8")))
         return keys
 
     def encrypt_value(self, plaintext: str) -> str:
@@ -104,11 +100,7 @@ class EncryptedFieldMixin:
         return self.to_python(value)
 
     def to_python(self, value: _TypeAny) -> _TypeAny:
-        if (
-            value is None
-            or not isinstance(value, str)
-            or hasattr(self, "_already_decrypted")
-        ):
+        if value is None or not isinstance(value, str) or hasattr(self, "_already_decrypted"):
             return value
         try:
             decrypted_value = self.decrypt_value(value)
@@ -219,11 +211,7 @@ class EncryptedJSONField(EncryptedFieldMixin, models.JSONField):
         return "JSONField"
 
     def to_python(self, value: _TypeAny) -> _TypeAny:
-        if (
-            value is None
-            or not isinstance(value, str)
-            or hasattr(self, "_already_decrypted")
-        ):
+        if value is None or not isinstance(value, str) or hasattr(self, "_already_decrypted"):
             return value
         try:
             loaded = json.loads(value)
